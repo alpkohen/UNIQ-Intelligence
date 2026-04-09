@@ -6,8 +6,8 @@ const ENV_VARS_USED = [
 ] as const;
 
 export function createSupabaseAdmin() {
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL!;
+  const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY!;
 
   const missing: string[] = [];
   if (!url?.trim()) missing.push("NEXT_PUBLIC_SUPABASE_URL");

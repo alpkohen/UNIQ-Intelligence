@@ -1,0 +1,10 @@
+# Next.js app lives in a subfolder — required for correct build & routing on Netlify
+[build]
+  base = "uniq-intelligence"
+  command = "npm run build"
+
+[build.environment]
+  NODE_VERSION = "20"
+
+[[plugins]]
+  package = "@netlify/plugin-nextjs"

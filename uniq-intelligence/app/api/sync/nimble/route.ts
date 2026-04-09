@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { createSupabaseAdmin } from "@/lib/supabase-admin";
 import { parseNimbleCompany, parseNimbleDeal } from "@/lib/nimble";
+import { toErrorMessage } from "@/lib/to-error-message";
 
 const DEALS_URL = "https://api.nimble.com/api/v1/deals";
 const CONTACTS_URL = "https://api.nimble.com/api/v1/contacts/";
@@ -61,8 +62,10 @@ export async function GET() {
   try {
     supabase = createSupabaseAdmin();
   } catch (e) {
-    const message = e instanceof Error ? e.message : "Supabase config error";
-    return NextResponse.json({ error: message }, { status: 500 });
+    return NextResponse.json(
+      { error: toErrorMessage(e) || "Supabase config error" },
+      { status: 500 },
+    );
   }
 
   try {
@@ -111,7 +114,8 @@ export async function GET() {
       synced_companies: companyRows.length,
     });
   } catch (e) {
-    const message = e instanceof Error ? e.message : "Sync failed";
+    const message = toErrorMessage(e);
+    console.error("[api/sync/nimble]", message, e);
     return NextResponse.json({ error: message }, { status: 500 });
   }
 }

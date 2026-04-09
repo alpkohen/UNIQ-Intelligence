@@ -5,8 +5,22 @@ import {
   buildTrainingImportSignature,
   parseTrainingSheetRows,
 } from "@/lib/training-sheet";
+import { toErrorMessage } from "@/lib/to-error-message";
 
-const GRAPH_OWNER_EMAIL = "uniqegitim@outlook.com";
+/** Org account whose “shared with me” list contains the workbook (override via env). */
+const DEFAULT_SHARED_WITH_ME_USER =
+  "uniqdanismanlik@uniqdanismanlik.onmicrosoft.com";
+
+type GraphDriveItem = {
+  id?: string;
+  name?: string;
+  parentReference?: { driveId?: string };
+  remoteItem?: {
+    id?: string;
+    name?: string;
+    parentReference?: { driveId?: string };
+  };
+};
 
 async function getGraphAccessToken(): Promise<string> {
   const tenant = process.env.MICROSOFT_TENANT_ID;
@@ -46,57 +60,108 @@ async function getGraphAccessToken(): Promise<string> {
   return json.access_token;
 }
 
-function userBaseUrl(email: string): string {
-  return `https://graph.microsoft.com/v1.0/users/${encodeURIComponent(email)}`;
+/** Resolve driveId + itemId for workbook API (shared items often use remoteItem). */
+function extractDriveAndItemIds(item: GraphDriveItem): {
+  driveId: string;
+  itemId: string;
+} | null {
+  const remote = item.remoteItem;
+  if (remote?.id && remote.parentReference?.driveId) {
+    return { driveId: remote.parentReference.driveId, itemId: remote.id };
+  }
+  if (item.id && item.parentReference?.driveId) {
+    return { driveId: item.parentReference.driveId, itemId: item.id };
+  }
+  if (remote?.id && item.parentReference?.driveId) {
+    return { driveId: item.parentReference.driveId, itemId: remote.id };
+  }
+  return null;
 }
 
-async function findDataAnalizWorkbook(
+async function fetchSharedWithMePage(
   token: string,
-  email: string,
-): Promise<{ id: string; name: string }> {
-  const base = userBaseUrl(email);
-  const searchUrl = `${base}/drive/root/search(q='Data_analiz')`;
-  const res = await fetch(searchUrl, {
+  userUpn: string,
+  nextUrl: string | null,
+): Promise<{ items: GraphDriveItem[]; nextLink: string | null }> {
+  const url =
+    nextUrl ??
+    `https://graph.microsoft.com/v1.0/users/${encodeURIComponent(userUpn)}/drive/sharedWithMe`;
+
+  const res = await fetch(url, {
     headers: { Authorization: `Bearer ${token}` },
     cache: "no-store",
   });
 
   if (!res.ok) {
     const t = await res.text();
-    throw new Error(`Graph search ${res.status}: ${t.slice(0, 500)}`);
+    throw new Error(`Graph sharedWithMe ${res.status}: ${t.slice(0, 800)}`);
   }
 
   const json = (await res.json()) as {
-    value?: Array<{ id?: string; name?: string }>;
+    value?: GraphDriveItem[];
+    "@odata.nextLink"?: string;
   };
-  const items = json.value ?? [];
+
+  return {
+    items: json.value ?? [],
+    nextLink: json["@odata.nextLink"] ?? null,
+  };
+}
+
+async function findDataAnalizFromSharedWithMe(
+  token: string,
+  userUpn: string,
+): Promise<{ driveId: string; itemId: string; name: string }> {
+  let nextLink: string | null = null;
+  const collected: GraphDriveItem[] = [];
+
+  do {
+    const { items, nextLink: nl } = await fetchSharedWithMePage(
+      token,
+      userUpn,
+      nextLink,
+    );
+    collected.push(...items);
+    nextLink = nl;
+  } while (nextLink);
 
   const match =
-    items.find(
+    collected.find(
       (i) =>
         i.name &&
         /Data_analiz/i.test(i.name) &&
         /\.(xlsx|xlsm|xlsb|xls)$/i.test(i.name),
-    ) ?? items.find((i) => i.name && /Data_analiz/i.test(i.name));
+    ) ?? collected.find((i) => i.name && /Data_analiz/i.test(i.name));
 
-  if (!match?.id || !match.name) {
+  if (!match) {
     throw new Error(
-      'No Excel workbook matching "Data_analiz" found in OneDrive search results',
+      `No file matching "Data_analiz" in sharedWithMe for ${userUpn} (${collected.length} items)`,
     );
   }
 
-  return { id: match.id, name: match.name };
+  const ids = extractDriveAndItemIds(match);
+  if (!ids) {
+    throw new Error(
+      'Found "Data_analiz" in sharedWithMe but could not resolve driveId/itemId (missing remoteItem/parentReference)',
+    );
+  }
+
+  return {
+    driveId: ids.driveId,
+    itemId: ids.itemId,
+    name: match.remoteItem?.name ?? match.name ?? "Data_analiz",
+  };
 }
 
 async function getDataWorksheetUsedRange(
   token: string,
-  email: string,
+  driveId: string,
   itemId: string,
 ): Promise<unknown[][]> {
-  const base = userBaseUrl(email);
+  const base = `https://graph.microsoft.com/v1.0/drives/${encodeURIComponent(driveId)}/items/${encodeURIComponent(itemId)}/workbook/worksheets`;
   const urls = [
-    `${base}/drive/items/${itemId}/workbook/worksheets/data/usedRange`,
-    `${base}/drive/items/${itemId}/workbook/worksheets('data')/usedRange`,
+    `${base}/data/usedRange`,
+    `${base}('data')/usedRange`,
   ];
 
   let lastStatus = 0;
@@ -198,22 +263,25 @@ export async function GET() {
   const errors: string[] = [];
   let synced = 0;
 
+  const sharedWithMeUser =
+    process.env.MICROSOFT_GRAPH_SHARED_WITH_ME_USER?.trim() ||
+    DEFAULT_SHARED_WITH_ME_USER;
+
   let supabase;
   try {
     supabase = createSupabaseAdmin();
   } catch (e) {
-    const message = e instanceof Error ? e.message : "Supabase config error";
+    const message = toErrorMessage(e) || "Supabase config error";
     return NextResponse.json({ synced: 0, errors: [message] }, { status: 500 });
   }
 
   try {
     const token = await getGraphAccessToken();
-    const workbook = await findDataAnalizWorkbook(token, GRAPH_OWNER_EMAIL);
-    const values = await getDataWorksheetUsedRange(
+    const { driveId, itemId } = await findDataAnalizFromSharedWithMe(
       token,
-      GRAPH_OWNER_EMAIL,
-      workbook.id,
+      sharedWithMeUser,
     );
+    const values = await getDataWorksheetUsedRange(token, driveId, itemId);
 
     const parsed = parseTrainingSheetRows(values);
 
@@ -282,7 +350,8 @@ export async function GET() {
 
     return NextResponse.json({ synced, errors });
   } catch (e) {
-    const message = e instanceof Error ? e.message : "OneDrive sync failed";
+    const message = toErrorMessage(e);
+    console.error("[api/sync/onedrive]", message, e);
     errors.push(message);
     return NextResponse.json({ synced, errors }, { status: 500 });
   }
