@@ -1,7 +1,9 @@
-# Next.js app lives in a subfolder — required for correct build & routing on Netlify
+# Monorepo: app in uniq-intelligence/. Base and publish MUST differ (Netlify rule).
+# If deploy still fails: Site settings → Build → clear "Publish directory" (let plugin + this file win).
 [build]
   base = "uniq-intelligence"
   command = "npm run build"
+  publish = "uniq-intelligence/.next"
 
 [build.environment]
   NODE_VERSION = "20"
