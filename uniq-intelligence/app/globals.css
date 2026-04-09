@@ -1,26 +1,35 @@
 @import "tailwindcss";
+@config "../tailwind.config.ts";
 
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --hub-bg: #0a0a0a;
+  --hub-sidebar: #111111;
+  --hub-gold: #c9a84c;
+  --hub-surface: #141414;
+  --hub-muted: #a3a3a3;
+  --hub-foreground: #fafafa;
 }
 
 @theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
+  --color-hub-bg: var(--hub-bg);
+  --color-hub-sidebar: var(--hub-sidebar);
+  --color-hub-gold: var(--hub-gold);
+  --color-hub-surface: var(--hub-surface);
+  --color-hub-muted: var(--hub-muted);
+  --color-hub-foreground: var(--hub-foreground);
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+html {
+  color-scheme: dark;
+  background-color: var(--hub-bg);
 }
 
 body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  background-color: #0a0a0a !important;
+  color: #ffffff !important;
+  min-height: 100%;
+  font-family: var(--font-geist-sans), system-ui, sans-serif;
 }
+
